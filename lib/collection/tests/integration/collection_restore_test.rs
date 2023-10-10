@@ -49,7 +49,7 @@ async fn test_collection_reloading_with_shards(shard_number: u32) {
         &collection_path.join("snapshots"),
     )
     .await;
-    assert_eq!(collection.info(None).await.unwrap().vectors_count, 2);
+    assert_eq!(collection.info(None).await.unwrap().vectors_count, Some(2));
 }
 
 #[tokio::test(flavor = "multi_thread")]
