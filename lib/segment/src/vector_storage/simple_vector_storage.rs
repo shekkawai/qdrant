@@ -17,7 +17,7 @@ use super::VectorStorageEnum;
 use crate::common::operation_error::{check_process_stopped, OperationError, OperationResult};
 use crate::common::rocksdb_wrapper::DatabaseColumnWrapper;
 use crate::common::Flusher;
-use crate::data_types::vectors::VectorElementType;
+use crate::data_types::vectors::{VectorElementType, VectorOrSparseRef};
 use crate::types::Distance;
 
 /// In-memory vector storage with on-update persistence using `store`
@@ -144,18 +144,19 @@ impl VectorStorage for SimpleVectorStorage {
         self.vectors.len()
     }
 
-    fn get_vector(&self, key: PointOffsetType) -> &[VectorElementType] {
-        self.vectors.get(key)
+    fn get_vector(&self, key: PointOffsetType) -> VectorOrSparseRef {
+        let result = self.vectors.get(key);
+        result.into()
     }
 
     fn insert_vector(
         &mut self,
         key: PointOffsetType,
-        vector: &[VectorElementType],
+        vector: VectorOrSparseRef,
     ) -> OperationResult<()> {
-        self.vectors.insert(key, vector)?;
+        self.vectors.insert(key, vector.try_into()?)?;
         self.set_deleted(key, false);
-        self.update_stored(key, false, Some(vector))?;
+        self.update_stored(key, false, Some(vector.try_into()?))?;
         Ok(())
     }
 
@@ -171,9 +172,9 @@ impl VectorStorage for SimpleVectorStorage {
             // Do not perform preprocessing - vectors should be already processed
             let other_vector = other.get_vector(point_id);
             let other_deleted = other.is_deleted_vector(point_id);
-            let new_id = self.vectors.push(other_vector)?;
+            let new_id = self.vectors.push(other_vector.try_into()?)?;
             self.set_deleted(new_id, other_deleted);
-            self.update_stored(new_id, other_deleted, Some(other_vector))?;
+            self.update_stored(new_id, other_deleted, Some(other_vector.try_into()?))?;
         }
         let end_index = self.vectors.len() as PointOffsetType;
         Ok(start_index..end_index)

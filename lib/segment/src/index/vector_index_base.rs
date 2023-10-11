@@ -21,7 +21,7 @@ pub trait VectorIndex {
         top: usize,
         params: Option<&SearchParams>,
         is_stopped: &AtomicBool,
-    ) -> Vec<Vec<ScoredPointOffset>>;
+    ) -> OperationResult<Vec<Vec<ScoredPointOffset>>>;
 
     /// Force internal index rebuild.
     fn build_index(&mut self, stopped: &AtomicBool) -> OperationResult<()>;
@@ -58,7 +58,7 @@ impl VectorIndex for VectorIndexEnum {
         top: usize,
         params: Option<&SearchParams>,
         is_stopped: &AtomicBool,
-    ) -> Vec<Vec<ScoredPointOffset>> {
+    ) -> OperationResult<Vec<Vec<ScoredPointOffset>>> {
         match self {
             VectorIndexEnum::Plain(index) => index.search(vectors, filter, top, params, is_stopped),
             VectorIndexEnum::HnswRam(index) => {

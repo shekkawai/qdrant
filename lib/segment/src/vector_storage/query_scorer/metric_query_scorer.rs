@@ -30,7 +30,10 @@ impl<'a, TMetric: Metric, TVectorStorage: VectorStorage> QueryScorer
 {
     #[inline]
     fn score_stored(&self, idx: PointOffsetType) -> ScoreType {
-        TMetric::similarity(&self.query, self.vector_storage.get_vector(idx))
+        TMetric::similarity(
+            &self.query,
+            self.vector_storage.get_vector(idx).try_into().unwrap(),
+        )
     }
 
     #[inline]
@@ -39,8 +42,8 @@ impl<'a, TMetric: Metric, TVectorStorage: VectorStorage> QueryScorer
     }
 
     fn score_internal(&self, point_a: PointOffsetType, point_b: PointOffsetType) -> ScoreType {
-        let v1 = self.vector_storage.get_vector(point_a);
-        let v2 = self.vector_storage.get_vector(point_b);
+        let v1 = self.vector_storage.get_vector(point_a).try_into().unwrap();
+        let v2 = self.vector_storage.get_vector(point_b).try_into().unwrap();
         TMetric::similarity(v1, v2)
     }
 }

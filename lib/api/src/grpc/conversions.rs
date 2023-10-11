@@ -418,6 +418,8 @@ impl From<segment::data_types::vectors::VectorStruct> for Vectors {
             segment::data_types::vectors::VectorStruct::Multi(vectors) => Self {
                 vectors_options: Some(VectorsOptions::Vectors(vectors.into())),
             },
+            segment::data_types::vectors::VectorStruct::Sparse(_) => unimplemented!(), // TODO(ivan)
+            segment::data_types::vectors::VectorStruct::MultiSparse(_) => unimplemented!(), // TODO(ivan)
         }
     }
 }

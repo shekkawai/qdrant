@@ -738,6 +738,9 @@ impl From<OperationError> for CollectionError {
             OperationError::ValidationError { .. } => Self::BadInput {
                 description: format!("{err}"),
             },
+            OperationError::WrongSparse => Self::BadInput {
+                description: format!("Spare vectors mismatch"), // TODO(ivan) proper message
+            },
         }
     }
 }
@@ -897,6 +900,8 @@ impl Record {
             Some(vectors) => match vectors {
                 VectorStruct::Single(_) => vec![DEFAULT_VECTOR_NAME],
                 VectorStruct::Multi(vectors) => vectors.keys().map(|x| x.as_str()).collect(),
+                VectorStruct::Sparse(_) => unimplemented!(), // TODO(ivan)
+                VectorStruct::MultiSparse(_) => unimplemented!(), // TODO(ivan)
             },
         }
     }
@@ -905,6 +910,8 @@ impl Record {
         match &self.vector {
             Some(VectorStruct::Single(vector)) => (name == DEFAULT_VECTOR_NAME).then_some(vector),
             Some(VectorStruct::Multi(vectors)) => vectors.get(name),
+            Some(VectorStruct::Sparse(_)) => unimplemented!(), // TODO(ivan)
+            Some(VectorStruct::MultiSparse(_)) => unimplemented!(), // TODO(ivan)
             None => None,
         }
     }

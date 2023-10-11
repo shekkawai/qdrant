@@ -15,7 +15,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::common::operation_error::{OperationError, OperationResult};
 use crate::data_types::named_vectors::NamedVectors;
-use crate::data_types::vectors::{QueryVector, VectorElementType};
+use crate::data_types::vectors::{QueryVector, VectorOrSparseRef};
 use crate::types::{SegmentConfig, VectorDataConfig};
 
 pub type Flusher = Box<dyn FnOnce() -> OperationResult<()> + Send>;
@@ -45,10 +45,10 @@ fn _check_query_vector(
     vector_config: &VectorDataConfig,
 ) -> OperationResult<()> {
     match query_vector {
-        QueryVector::Nearest(vector) => check_vector_against_config(vector, vector_config)?,
+        QueryVector::Nearest(vector) => check_vector_against_config(vector.into(), vector_config)?,
         QueryVector::Recommend(reco_query) => reco_query
             .iter_all()
-            .try_for_each(|vector| check_vector_against_config(vector, vector_config))?,
+            .try_for_each(|vector| check_vector_against_config(vector.into(), vector_config))?,
     }
 
     Ok(())
@@ -77,7 +77,7 @@ pub fn check_named_vectors(
     segment_config: &SegmentConfig,
 ) -> OperationResult<()> {
     for (vector_name, vector_data) in vectors.iter() {
-        check_vector(vector_name, &vector_data.to_vec().into(), segment_config)?;
+        check_vector(vector_name, &vector_data.into(), segment_config)?;
     }
     Ok(())
 }
@@ -101,7 +101,7 @@ fn get_vector_config_or_error<'a>(
 ///
 /// Returns an error if incompatible.
 fn check_vector_against_config(
-    vector: &[VectorElementType],
+    vector: VectorOrSparseRef,
     vector_config: &VectorDataConfig,
 ) -> OperationResult<()> {
     // Check dimensionality

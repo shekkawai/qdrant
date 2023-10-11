@@ -1,6 +1,7 @@
 use common::types::ScoreType;
 
-use crate::data_types::vectors::{QueryVector, VectorType};
+use crate::common::operation_error::OperationError;
+use crate::data_types::vectors::{QueryVector, VectorOrSparse, VectorType};
 
 #[derive(Debug, Clone)]
 pub struct RecoQuery<T> {
@@ -63,9 +64,35 @@ fn merge_similarities(
     }
 }
 
-impl From<RecoQuery<VectorType>> for QueryVector {
-    fn from(query: RecoQuery<VectorType>) -> Self {
+impl From<RecoQuery<VectorOrSparse>> for QueryVector {
+    fn from(query: RecoQuery<VectorOrSparse>) -> Self {
         QueryVector::Recommend(query)
+    }
+}
+
+impl TryFrom<RecoQuery<VectorOrSparse>> for RecoQuery<VectorType> {
+    type Error = OperationError;
+
+    fn try_from(query: RecoQuery<VectorOrSparse>) -> Result<Self, Self::Error> {
+        let positives = query
+            .positives
+            .into_iter()
+            .map(|v| match v {
+                VectorOrSparse::Vector(v) => Ok(v),
+                VectorOrSparse::Sparse(_) => Err(OperationError::WrongSparse),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let negatives = query
+            .negatives
+            .into_iter()
+            .map(|v| match v {
+                VectorOrSparse::Vector(v) => Ok(v),
+                VectorOrSparse::Sparse(_) => Err(OperationError::WrongSparse),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self::new(positives, negatives))
     }
 }
 

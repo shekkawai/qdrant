@@ -159,16 +159,18 @@ fn test_filterable_hnsw() {
         let filter_query = Some(&filter);
         // let filter_query = None;
 
-        let index_result = hnsw_index.search(
-            &[&query],
-            filter_query,
-            top,
-            Some(&SearchParams {
-                hnsw_ef: Some(ef),
-                ..Default::default()
-            }),
-            &false.into(),
-        );
+        let index_result = hnsw_index
+            .search(
+                &[&query],
+                filter_query,
+                top,
+                Some(&SearchParams {
+                    hnsw_ef: Some(ef),
+                    ..Default::default()
+                }),
+                &false.into(),
+            )
+            .unwrap();
 
         // check that search was performed using HNSW index
         assert_eq!(
@@ -182,7 +184,8 @@ fn test_filterable_hnsw() {
         let plain_result = segment.vector_data[DEFAULT_VECTOR_NAME]
             .vector_index
             .borrow()
-            .search(&[&query], filter_query, top, None, &false.into());
+            .search(&[&query], filter_query, top, None, &false.into())
+            .unwrap();
 
         if plain_result == index_result {
             hits += 1;

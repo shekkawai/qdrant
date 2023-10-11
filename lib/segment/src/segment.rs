@@ -23,8 +23,8 @@ use crate::common::version::{StorageVersion, VERSION_FILE};
 use crate::common::{
     check_named_vectors, check_query_vectors, check_stopped, check_vector, check_vector_name,
 };
-use crate::data_types::named_vectors::NamedVectors;
-use crate::data_types::vectors::{QueryVector, VectorElementType};
+use crate::data_types::named_vectors::{CowValue, NamedVectors};
+use crate::data_types::vectors::{QueryVector, VectorOrSparse, VectorOrSparseRef};
 use crate::entry::entry_point::SegmentEntry;
 use crate::id_tracker::IdTrackerSS;
 use crate::index::field_index::CardinalityEstimation;
@@ -171,10 +171,14 @@ impl Segment {
         check_named_vectors(&vectors, &self.segment_config)?;
         for (vector_name, new_vector) in vectors {
             let vector_data = &self.vector_data[vector_name.as_ref()];
+            let v = match &new_vector {
+                CowValue::Vector(vec) => VectorOrSparseRef::Vector(&vec),
+                CowValue::Sparse(sparse) => VectorOrSparseRef::Sparse(&sparse),
+            };
             vector_data
                 .vector_storage
                 .borrow_mut()
-                .insert_vector(internal_id, new_vector.as_ref())?;
+                .insert_vector(internal_id, v)?;
         }
         Ok(())
     }
@@ -198,7 +202,7 @@ impl Segment {
             match vector_opt {
                 None => {
                     let dim = vector_storage.vector_dim();
-                    vector_storage.insert_vector(new_index, &vec![1.0; dim])?;
+                    vector_storage.insert_vector(new_index, vec![1.0; dim].as_slice().into())?;
                     vector_storage.delete_vector(new_index)?;
                 }
                 Some(vec) => {
@@ -375,7 +379,7 @@ impl Segment {
         &self,
         vector_name: &str,
         point_offset: PointOffsetType,
-    ) -> OperationResult<Option<Vec<VectorElementType>>> {
+    ) -> OperationResult<Option<VectorOrSparse>> {
         check_vector_name(vector_name, &self.segment_config)?;
         let vector_data = &self.vector_data[vector_name];
         let is_vector_deleted = vector_data
@@ -399,7 +403,7 @@ impl Segment {
                     ),
                 })
             } else {
-                Ok(Some(vector_storage.get_vector(point_offset).to_vec()))
+                Ok(Some(vector_storage.get_vector(point_offset).to_owned()))
             }
         } else {
             Ok(None)
@@ -423,7 +427,7 @@ impl Segment {
                         .vector_storage
                         .borrow()
                         .get_vector(point_offset)
-                        .to_vec(),
+                        .to_owned(),
                 );
             }
         }
@@ -746,11 +750,13 @@ impl SegmentEntry for Segment {
     ) -> OperationResult<Vec<ScoredPoint>> {
         check_vector(vector_name, vector, &self.segment_config)?;
         let vector_data = &self.vector_data[vector_name];
-        let internal_result =
-            &vector_data
-                .vector_index
-                .borrow()
-                .search(&[vector], filter, top, params, is_stopped)[0];
+        let internal_result = &vector_data.vector_index.borrow().search(
+            &[vector],
+            filter,
+            top,
+            params,
+            is_stopped,
+        )?[0];
 
         check_stopped(is_stopped)?;
         self.process_search_result(internal_result, with_payload, with_vector)
@@ -775,7 +781,7 @@ impl SegmentEntry for Segment {
             top,
             params,
             is_stopped,
-        );
+        )?;
 
         check_stopped(is_stopped)?;
 
@@ -976,7 +982,7 @@ impl SegmentEntry for Segment {
         &self,
         vector_name: &str,
         point_id: PointIdType,
-    ) -> OperationResult<Option<Vec<VectorElementType>>> {
+    ) -> OperationResult<Option<VectorOrSparse>> {
         check_vector_name(vector_name, &self.segment_config)?;
         let internal_id = self.lookup_internal_id(point_id)?;
         let vector_opt = self.vector_by_offset(vector_name, internal_id)?;
@@ -2179,12 +2185,12 @@ mod tests {
         ];
         let wrong_vectors_multi = vec![
             // Incorrect dimensionality
-            NamedVectors::from_ref("a", &[]),
-            NamedVectors::from_ref("a", &[0.0, 1.0, 0.0]),
-            NamedVectors::from_ref("a", &[0.0, 1.0, 0.0, 1.0, 0.0]),
-            NamedVectors::from_ref("b", &[]),
-            NamedVectors::from_ref("b", &[0.5]),
-            NamedVectors::from_ref("b", &[0.0, 0.1, 0.2, 0.3]),
+            NamedVectors::from_ref("a", [].as_slice().into()),
+            NamedVectors::from_ref("a", [0.0, 1.0, 0.0].as_slice().into()),
+            NamedVectors::from_ref("a", [0.0, 1.0, 0.0, 1.0, 0.0].as_slice().into()),
+            NamedVectors::from_ref("b", [].as_slice().into()),
+            NamedVectors::from_ref("b", [0.5].as_slice().into()),
+            NamedVectors::from_ref("b", [0.0, 0.1, 0.2, 0.3].as_slice().into()),
             NamedVectors::from([
                 ("a".into(), vec![0.1, 0.2, 0.3]),
                 ("b".into(), vec![1.0, 0.9]),
@@ -2194,8 +2200,8 @@ mod tests {
                 ("b".into(), vec![1.0, 0.9, 0.0]),
             ]),
             // Incorrect names
-            NamedVectors::from_ref("aa", &[0.0, 0.1, 0.2, 0.3]),
-            NamedVectors::from_ref("bb", &[0.0, 0.1]),
+            NamedVectors::from_ref("aa", [0.0, 0.1, 0.2, 0.3].as_slice().into()),
+            NamedVectors::from_ref("bb", [0.0, 0.1].as_slice().into()),
             NamedVectors::from([
                 ("aa".into(), vec![0.1, 0.2, 0.3, 0.4]),
                 ("b".into(), vec![1.0, 0.9]),
@@ -2208,7 +2214,8 @@ mod tests {
         let wrong_names = vec!["aa", "bb", ""];
 
         for (vector_name, vector) in wrong_vectors_single.iter() {
-            let query_vector = vector.to_owned().into();
+            let vector: VectorOrSparse = vector.to_owned().into();
+            let query_vector = vector.into();
             check_vector(vector_name, &query_vector, &config)
                 .err()
                 .unwrap();

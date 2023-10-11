@@ -52,11 +52,11 @@ fn random_reco_query<R: Rng + ?Sized>(
     let num_negatives: usize = rnd.gen_range(0..MAX_EXAMPLES);
 
     let positives = (0..num_positives)
-        .map(|_| sampler.take(dim).collect())
+        .map(|_| sampler.take(dim).collect_vec().into())
         .collect_vec();
 
     let negatives = (0..num_negatives)
-        .map(|_| sampler.take(dim).collect())
+        .map(|_| sampler.take(dim).collect_vec().into())
         .collect_vec();
 
     RecoQuery::new(positives, negatives).into()
@@ -187,7 +187,7 @@ fn scoring_equivalency(
             query.clone(),
             &raw_storage,
             id_tracker.deleted_point_bitslice(),
-        );
+        )?;
 
         let is_stopped = AtomicBool::new(false);
 
@@ -199,7 +199,7 @@ fn scoring_equivalency(
                 &is_stopped,
             ),
             None => new_raw_scorer(query, &other_storage, id_tracker.deleted_point_bitslice()),
-        };
+        }?;
 
         let points =
             (0..other_storage.total_vector_count() as _).choose_multiple(&mut rng, SAMPLE_SIZE);

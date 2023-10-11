@@ -33,7 +33,7 @@ impl<'a, TMetric: Metric, TVectorStorage: VectorStorage> QueryScorer
 {
     #[inline]
     fn score_stored(&self, idx: PointOffsetType) -> ScoreType {
-        let stored = self.vector_storage.get_vector(idx);
+        let stored = self.vector_storage.get_vector(idx).try_into().unwrap();
         self.score(stored)
     }
 

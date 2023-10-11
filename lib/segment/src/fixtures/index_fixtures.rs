@@ -9,7 +9,9 @@ use rand::Rng;
 
 use crate::common::operation_error::OperationResult;
 use crate::common::Flusher;
-use crate::data_types::vectors::{VectorElementType, VectorType};
+use crate::data_types::vectors::{
+    VectorElementType, VectorOrSparse, VectorOrSparseRef, VectorType,
+};
 use crate::payload_storage::FilterContext;
 use crate::spaces::metric::Metric;
 use crate::types::Distance;
@@ -54,16 +56,16 @@ impl<TMetric: Metric> VectorStorage for TestRawScorerProducer<TMetric> {
         self.vectors.len()
     }
 
-    fn get_vector(&self, key: PointOffsetType) -> &[VectorElementType] {
-        self.vectors.get(key)
+    fn get_vector(&self, key: PointOffsetType) -> VectorOrSparseRef {
+        self.vectors.get(key).into()
     }
 
     fn insert_vector(
         &mut self,
         key: PointOffsetType,
-        vector: &[VectorElementType],
+        vector: VectorOrSparseRef,
     ) -> OperationResult<()> {
-        self.vectors.insert(key, vector)?;
+        self.vectors.insert(key, vector.try_into()?)?;
         Ok(())
     }
 
@@ -123,8 +125,9 @@ where
         }
     }
 
-    pub fn get_raw_scorer(&self, query: VectorType) -> Box<dyn RawScorer + '_> {
-        let query = TMetric::preprocess(query).into();
+    pub fn get_raw_scorer(&self, query: VectorType) -> OperationResult<Box<dyn RawScorer + '_>> {
+        let v: VectorOrSparse = TMetric::preprocess(query).into();
+        let query = v.into();
         raw_scorer_impl(
             query,
             self,

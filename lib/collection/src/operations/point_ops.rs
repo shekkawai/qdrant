@@ -463,6 +463,8 @@ impl PointStruct {
         match &self.vector {
             VectorStruct::Single(vector) => only_default_vector(vector),
             VectorStruct::Multi(vectors) => NamedVectors::from_map_ref(vectors),
+            VectorStruct::Sparse(_) => unimplemented!(), // TODO(ivan)
+            VectorStruct::MultiSparse(_) => unimplemented!(), // TODO(ivan)
         }
     }
 }

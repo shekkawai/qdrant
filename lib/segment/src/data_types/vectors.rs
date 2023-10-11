@@ -2,8 +2,10 @@ use std::collections::HashMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sparse::common::sparse_vector::SparseVector;
 
 use super::named_vectors::NamedVectors;
+use crate::common::operation_error::OperationError;
 use crate::common::utils::transpose_map_into_named_vector;
 use crate::vector_storage::query::reco_query::RecoQuery;
 
@@ -15,12 +17,146 @@ pub const DEFAULT_VECTOR_NAME: &str = "";
 /// Type for vector
 pub type VectorType = Vec<VectorElementType>;
 
+#[derive(Debug, Clone)]
+pub enum VectorOrSparse {
+    Vector(VectorType),
+    Sparse(SparseVector),
+}
+
+#[derive(Clone, Copy)]
+pub enum VectorOrSparseRef<'a> {
+    Vector(&'a [VectorElementType]),
+    Sparse(&'a SparseVector),
+}
+
+impl<'a> VectorOrSparseRef<'a> {
+    // Cannot use `ToOwned` trait because of `Borrow` implementation for `VectorOrSparse`
+    pub fn to_owned(self) -> VectorOrSparse {
+        match self {
+            VectorOrSparseRef::Vector(v) => VectorOrSparse::Vector(v.to_vec()),
+            VectorOrSparseRef::Sparse(v) => VectorOrSparse::Sparse(v.clone()),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            VectorOrSparseRef::Vector(v) => v.len(),
+            VectorOrSparseRef::Sparse(v) => v.indices.len(),
+        }
+    }
+}
+
+impl<'a> From<&'a VectorType> for VectorOrSparseRef<'a> {
+    fn from(v: &'a VectorType) -> Self {
+        VectorOrSparseRef::Vector(v)
+    }
+}
+
+impl From<VectorType> for VectorOrSparse {
+    fn from(v: VectorType) -> Self {
+        VectorOrSparse::Vector(v)
+    }
+}
+
+impl<'a> From<&'a [VectorElementType]> for VectorOrSparseRef<'a> {
+    fn from(v: &'a [VectorElementType]) -> Self {
+        VectorOrSparseRef::Vector(v)
+    }
+}
+
+impl From<SparseVector> for VectorOrSparse {
+    fn from(v: SparseVector) -> Self {
+        VectorOrSparse::Sparse(v)
+    }
+}
+
+impl<'a> From<&'a SparseVector> for VectorOrSparseRef<'a> {
+    fn from(v: &'a SparseVector) -> Self {
+        VectorOrSparseRef::Sparse(v)
+    }
+}
+
+impl<'a> Into<VectorOrSparseRef<'a>> for &'a VectorOrSparse {
+    fn into(self) -> VectorOrSparseRef<'a> {
+        match self {
+            VectorOrSparse::Vector(v) => VectorOrSparseRef::Vector(v),
+            VectorOrSparse::Sparse(v) => VectorOrSparseRef::Sparse(v),
+        }
+    }
+}
+
+impl<'a> TryInto<&'a [VectorElementType]> for &'a VectorOrSparse {
+    type Error = OperationError;
+
+    fn try_into(self) -> Result<&'a [VectorElementType], Self::Error> {
+        match self {
+            VectorOrSparse::Vector(v) => Ok(v),
+            VectorOrSparse::Sparse(_) => Err(OperationError::WrongSparse),
+        }
+    }
+}
+
+impl TryInto<VectorType> for VectorOrSparse {
+    type Error = OperationError;
+
+    fn try_into(self) -> Result<VectorType, Self::Error> {
+        match self {
+            VectorOrSparse::Vector(v) => Ok(v),
+            VectorOrSparse::Sparse(_) => Err(OperationError::WrongSparse),
+        }
+    }
+}
+
+impl<'a> TryInto<&'a SparseVector> for &'a VectorOrSparse {
+    type Error = OperationError;
+
+    fn try_into(self) -> Result<&'a SparseVector, Self::Error> {
+        match self {
+            VectorOrSparse::Vector(_) => Err(OperationError::WrongSparse),
+            VectorOrSparse::Sparse(v) => Ok(v),
+        }
+    }
+}
+
+impl TryInto<SparseVector> for VectorOrSparse {
+    type Error = OperationError;
+
+    fn try_into(self) -> Result<SparseVector, Self::Error> {
+        match self {
+            VectorOrSparse::Vector(_) => Err(OperationError::WrongSparse),
+            VectorOrSparse::Sparse(v) => Ok(v),
+        }
+    }
+}
+
+impl<'a> TryInto<&'a [VectorElementType]> for VectorOrSparseRef<'a> {
+    type Error = OperationError;
+
+    fn try_into(self) -> Result<&'a [VectorElementType], Self::Error> {
+        match self {
+            VectorOrSparseRef::Vector(v) => Ok(v),
+            VectorOrSparseRef::Sparse(_) => Err(OperationError::WrongSparse),
+        }
+    }
+}
+
+impl<'a> TryInto<&'a SparseVector> for VectorOrSparseRef<'a> {
+    type Error = OperationError;
+
+    fn try_into(self) -> Result<&'a SparseVector, Self::Error> {
+        match self {
+            VectorOrSparseRef::Vector(_) => Err(OperationError::WrongSparse),
+            VectorOrSparseRef::Sparse(v) => Ok(v),
+        }
+    }
+}
+
 pub fn default_vector(vec: Vec<VectorElementType>) -> NamedVectors<'static> {
     NamedVectors::from([(DEFAULT_VECTOR_NAME.to_owned(), vec)])
 }
 
 pub fn only_default_vector(vec: &[VectorElementType]) -> NamedVectors {
-    NamedVectors::from_ref(DEFAULT_VECTOR_NAME, vec)
+    NamedVectors::from_ref(DEFAULT_VECTOR_NAME, vec.into())
 }
 
 /// Full vector data per point separator with single and multiple vector modes
@@ -29,6 +165,8 @@ pub fn only_default_vector(vec: &[VectorElementType]) -> NamedVectors {
 pub enum VectorStruct {
     Single(VectorType),
     Multi(HashMap<String, VectorType>),
+    Sparse(SparseVector),
+    MultiSparse(HashMap<String, SparseVector>),
 }
 
 impl VectorStruct {
@@ -37,6 +175,8 @@ impl VectorStruct {
         match self {
             VectorStruct::Single(vector) => vector.is_empty(),
             VectorStruct::Multi(vectors) => vectors.values().all(|v| v.is_empty()),
+            VectorStruct::Sparse(vector) => vector.indices.is_empty(),
+            VectorStruct::MultiSparse(vectors) => vectors.values().all(|v| v.indices.is_empty()),
         }
     }
 }
@@ -47,6 +187,12 @@ impl From<VectorType> for VectorStruct {
     }
 }
 
+impl From<SparseVector> for VectorStruct {
+    fn from(v: SparseVector) -> Self {
+        VectorStruct::Sparse(v)
+    }
+}
+
 impl From<&[VectorElementType]> for VectorStruct {
     fn from(v: &[VectorElementType]) -> Self {
         VectorStruct::Single(v.to_vec())
@@ -54,6 +200,7 @@ impl From<&[VectorElementType]> for VectorStruct {
 }
 
 impl<'a> From<NamedVectors<'a>> for VectorStruct {
+    // TODO(ivan): add conversion for sparse vectors
     fn from(v: NamedVectors) -> Self {
         if v.len() == 1 && v.contains_key(DEFAULT_VECTOR_NAME) {
             VectorStruct::Single(v.into_default_vector().unwrap())
@@ -68,6 +215,8 @@ impl VectorStruct {
         match self {
             VectorStruct::Single(v) => (name == DEFAULT_VECTOR_NAME).then_some(v),
             VectorStruct::Multi(v) => v.get(name),
+            VectorStruct::Sparse(_v) => todo!(), //TODO(ivan)
+            VectorStruct::MultiSparse(_v) => todo!(), //TODO(ivan)
         }
     }
 
@@ -75,6 +224,8 @@ impl VectorStruct {
         match self {
             VectorStruct::Single(v) => default_vector(v),
             VectorStruct::Multi(v) => NamedVectors::from_map(v),
+            VectorStruct::Sparse(_v) => todo!(), //NamedVectors::from_sparse(v),
+            VectorStruct::MultiSparse(_v) => todo!(), //NamedVectors::from_sparse_map(v),
         }
     }
 }
@@ -230,24 +381,32 @@ impl Named for NamedRecoQuery {
 
 #[derive(Debug, Clone)]
 pub enum QueryVector {
-    Nearest(VectorType),
-    Recommend(RecoQuery<VectorType>),
-}
-
-impl From<VectorType> for QueryVector {
-    fn from(vec: VectorType) -> Self {
-        Self::Nearest(vec)
-    }
+    Nearest(VectorOrSparse),
+    Recommend(RecoQuery<VectorOrSparse>),
 }
 
 impl<'a> From<&'a [VectorElementType]> for QueryVector {
     fn from(vec: &'a [VectorElementType]) -> Self {
-        Self::Nearest(vec.to_vec())
+        let v: VectorOrSparseRef = vec.into();
+        Self::Nearest(v.to_owned())
+    }
+}
+
+impl From<VectorOrSparse> for QueryVector {
+    fn from(vec: VectorOrSparse) -> Self {
+        Self::Nearest(vec)
+    }
+}
+
+impl<'a> From<VectorOrSparseRef<'a>> for QueryVector {
+    fn from(vec: VectorOrSparseRef<'a>) -> Self {
+        Self::Nearest(vec.to_owned())
     }
 }
 
 impl<const N: usize> From<[VectorElementType; N]> for QueryVector {
     fn from(vec: [VectorElementType; N]) -> Self {
-        Self::Nearest(vec.to_vec())
+        let vec: VectorOrSparseRef = vec.as_slice().into();
+        Self::Nearest(vec.to_owned())
     }
 }

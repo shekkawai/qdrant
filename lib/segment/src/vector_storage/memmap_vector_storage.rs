@@ -13,7 +13,7 @@ use memory::mmap_ops;
 use super::VectorStorageEnum;
 use crate::common::operation_error::{check_process_stopped, OperationResult};
 use crate::common::Flusher;
-use crate::data_types::vectors::VectorElementType;
+use crate::data_types::vectors::VectorOrSparseRef;
 use crate::types::Distance;
 use crate::vector_storage::common::get_async_scorer;
 use crate::vector_storage::mmap_vectors::MmapVectors;
@@ -103,14 +103,14 @@ impl VectorStorage for MemmapVectorStorage {
         self.mmap_store.as_ref().unwrap().num_vectors
     }
 
-    fn get_vector(&self, key: PointOffsetType) -> &[VectorElementType] {
-        self.mmap_store.as_ref().unwrap().get_vector(key)
+    fn get_vector(&self, key: PointOffsetType) -> VectorOrSparseRef {
+        self.mmap_store.as_ref().unwrap().get_vector(key).into()
     }
 
     fn insert_vector(
         &mut self,
         _key: PointOffsetType,
-        _vector: &[VectorElementType],
+        _vector: VectorOrSparseRef,
     ) -> OperationResult<()> {
         panic!("Can't directly update vector in mmap storage")
     }
@@ -137,7 +137,7 @@ impl VectorStorage for MemmapVectorStorage {
         for id in other_ids {
             check_process_stopped(stopped)?;
             let vector = other.get_vector(id);
-            let raw_bites = mmap_ops::transmute_to_u8_slice(vector);
+            let raw_bites = mmap_ops::transmute_to_u8_slice(vector.try_into()?);
             vectors_file.write_all(raw_bites)?;
             end_index += 1;
 
@@ -218,7 +218,7 @@ mod tests {
 
     use super::*;
     use crate::common::rocksdb_wrapper::{open_db, DB_VECTOR_CF};
-    use crate::data_types::vectors::QueryVector;
+    use crate::data_types::vectors::{QueryVector, VectorElementType};
     use crate::fixtures::payload_context_fixture::FixtureIdTracker;
     use crate::id_tracker::IdTracker;
     use crate::types::{PointIdType, QuantizationConfig, ScalarQuantizationConfig};
@@ -257,9 +257,15 @@ mod tests {
             let storage2 = open_simple_vector_storage(db, DB_VECTOR_CF, 4, Distance::Dot).unwrap();
             {
                 let mut borrowed_storage2 = storage2.borrow_mut();
-                borrowed_storage2.insert_vector(0, &points[0]).unwrap();
-                borrowed_storage2.insert_vector(1, &points[1]).unwrap();
-                borrowed_storage2.insert_vector(2, &points[2]).unwrap();
+                borrowed_storage2
+                    .insert_vector(0, points[0].as_slice().into())
+                    .unwrap();
+                borrowed_storage2
+                    .insert_vector(1, points[1].as_slice().into())
+                    .unwrap();
+                borrowed_storage2
+                    .insert_vector(2, points[2].as_slice().into())
+                    .unwrap();
             }
             borrowed_storage
                 .update_from(&storage2.borrow(), &mut Box::new(0..3), &Default::default())
@@ -268,7 +274,7 @@ mod tests {
 
         assert_eq!(borrowed_storage.total_vector_count(), 3);
 
-        let vector = borrowed_storage.get_vector(1).to_vec();
+        let vector: &[VectorElementType] = borrowed_storage.get_vector(1).try_into().unwrap();
 
         assert_eq!(points[1], vector);
 
@@ -280,8 +286,12 @@ mod tests {
             let storage2 = open_simple_vector_storage(db, DB_VECTOR_CF, 4, Distance::Dot).unwrap();
             {
                 let mut borrowed_storage2 = storage2.borrow_mut();
-                borrowed_storage2.insert_vector(3, &points[3]).unwrap();
-                borrowed_storage2.insert_vector(4, &points[4]).unwrap();
+                borrowed_storage2
+                    .insert_vector(3, points[3].as_slice().into())
+                    .unwrap();
+                borrowed_storage2
+                    .insert_vector(4, points[4].as_slice().into())
+                    .unwrap();
             }
             borrowed_storage
                 .update_from(&storage2.borrow(), &mut Box::new(0..2), &Default::default())
@@ -298,7 +308,8 @@ mod tests {
             points[2].as_slice().into(),
             &borrowed_storage,
             borrowed_id_tracker.deleted_point_bitslice(),
-        );
+        )
+        .unwrap();
         let res = raw_scorer.peek_top_all(2);
 
         assert_eq!(res.len(), 2);
@@ -336,7 +347,7 @@ mod tests {
                 let mut borrowed_storage2 = storage2.borrow_mut();
                 points.iter().enumerate().for_each(|(i, vec)| {
                     borrowed_storage2
-                        .insert_vector(i as PointOffsetType, vec)
+                        .insert_vector(i as PointOffsetType, vec.into())
                         .unwrap();
                 });
             }
@@ -375,6 +386,7 @@ mod tests {
             &borrowed_storage,
             borrowed_id_tracker.deleted_point_bitslice(),
         )
+        .unwrap()
         .peek_top_iter(&mut [0, 1, 2, 3, 4].iter().cloned(), 5);
         assert_eq!(closest.len(), 3, "must have 3 vectors, 2 are deleted");
         assert_eq!(closest[0].idx, 0);
@@ -402,6 +414,7 @@ mod tests {
             &borrowed_storage,
             borrowed_id_tracker.deleted_point_bitslice(),
         )
+        .unwrap()
         .peek_top_iter(&mut [0, 1, 2, 3, 4].iter().cloned(), 5);
         assert_eq!(closest.len(), 2, "must have 2 vectors, 3 are deleted");
         assert_eq!(closest[0].idx, 4);
@@ -427,6 +440,7 @@ mod tests {
             &borrowed_storage,
             borrowed_id_tracker.deleted_point_bitslice(),
         )
+        .unwrap()
         .peek_top_all(5);
         assert!(closest.is_empty(), "must have no results, all deleted");
     }
@@ -457,7 +471,7 @@ mod tests {
                 let mut borrowed_storage2 = storage2.borrow_mut();
                 points.iter().enumerate().for_each(|(i, vec)| {
                     borrowed_storage2
-                        .insert_vector(i as PointOffsetType, vec)
+                        .insert_vector(i as PointOffsetType, vec.into())
                         .unwrap();
                     if delete_mask[i] {
                         borrowed_storage2
@@ -488,6 +502,7 @@ mod tests {
             &borrowed_storage,
             borrowed_id_tracker.deleted_point_bitslice(),
         )
+        .unwrap()
         .peek_top_iter(&mut [0, 1, 2, 3, 4].iter().cloned(), 5);
         assert_eq!(closest.len(), 3, "must have 3 vectors, 2 are deleted");
         assert_eq!(closest[0].idx, 0);
@@ -535,7 +550,7 @@ mod tests {
                 let mut borrowed_storage2 = storage2.borrow_mut();
                 for (i, vec) in points.iter().enumerate() {
                     borrowed_storage2
-                        .insert_vector(i as PointOffsetType, vec)
+                        .insert_vector(i as PointOffsetType, vec.into())
                         .unwrap();
                 }
             }
@@ -556,7 +571,8 @@ mod tests {
             query,
             &borrowed_storage,
             borrowed_id_tracker.deleted_point_bitslice(),
-        );
+        )
+        .unwrap();
 
         let mut res = vec![ScoredPointOffset { idx: 0, score: 0. }; query_points.len()];
         let res_count = scorer.score_points(&query_points, &mut res);
@@ -613,7 +629,7 @@ mod tests {
                 let mut borrowed_storage2 = storage2.borrow_mut();
                 for (i, vec) in points.iter().enumerate() {
                     borrowed_storage2
-                        .insert_vector(i as PointOffsetType, vec)
+                        .insert_vector(i as PointOffsetType, vec.into())
                         .unwrap();
                 }
             }
@@ -641,17 +657,20 @@ mod tests {
 
         {
             let borrowed_quantized_vectors = quantized_vectors.borrow();
-            let scorer_quant = borrowed_quantized_vectors.raw_scorer(
-                query.clone(),
-                borrowed_id_tracker.deleted_point_bitslice(),
-                borrowed_storage.deleted_vector_bitslice(),
-                &stopped,
-            );
+            let scorer_quant = borrowed_quantized_vectors
+                .raw_scorer(
+                    query.clone(),
+                    borrowed_id_tracker.deleted_point_bitslice(),
+                    borrowed_storage.deleted_vector_bitslice(),
+                    &stopped,
+                )
+                .unwrap();
             let scorer_orig = new_raw_scorer(
                 query.clone(),
                 &borrowed_storage,
                 borrowed_id_tracker.deleted_point_bitslice(),
-            );
+            )
+            .unwrap();
             for i in 0..5 {
                 let quant = scorer_quant.score_point(i);
                 let orig = scorer_orig.score_point(i);
@@ -671,17 +690,20 @@ mod tests {
         assert_eq!(quantization_files, quantized_vectors.borrow().files());
 
         let borrowed_quantized_vectors = quantized_vectors.borrow();
-        let scorer_quant = borrowed_quantized_vectors.raw_scorer(
-            query.clone(),
-            borrowed_id_tracker.deleted_point_bitslice(),
-            borrowed_storage.deleted_vector_bitslice(),
-            &stopped,
-        );
+        let scorer_quant = borrowed_quantized_vectors
+            .raw_scorer(
+                query.clone(),
+                borrowed_id_tracker.deleted_point_bitslice(),
+                borrowed_storage.deleted_vector_bitslice(),
+                &stopped,
+            )
+            .unwrap();
         let scorer_orig = new_raw_scorer(
             query,
             &borrowed_storage,
             borrowed_id_tracker.deleted_point_bitslice(),
-        );
+        )
+        .unwrap();
 
         for i in 0..5 {
             let quant = scorer_quant.score_point(i);
