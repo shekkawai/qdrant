@@ -141,7 +141,7 @@ service:
   enable_cors: true
 
   # Enable HTTPS for the REST and gRPC API
-  enable_tls: false
+  enable_tls: true
 
   # Check user HTTPS client certificate against CA file specified in tls config
   verify_https_client_certificate: false
@@ -155,7 +155,7 @@ service:
   # Sending an api-key over an unencrypted channel is insecure.
   #
   # Uncomment to enable.
-  # api_key: your_secret_api_key_here
+  api_key: "5fa459ddb69f1911a568ecaf216a991c"
 
 cluster:
   # Use `enabled: true` to run Qdrant in distributed deployment mode
